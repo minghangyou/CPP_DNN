@@ -8,5 +8,10 @@
 
 - 批归一化层
 - Conv1D层
+<<<<<<< HEAD
 - 激活函数（Sigmoid、tanh、relu）
 - Bi-LSTM
+=======
+- 激活函数（ELU、tanh）
+- Bi-LSTM
+>>>>>>> 6613f6a1c52f054d65e5b6b34ff44cf7e1e2f91a
