@@ -147,7 +147,6 @@ template<class F>
 vector<vector<F>> Concatence(const vector<vector<F>>& vec) {
 	return vec;
 }
-
 template<class F, class ...Args>
 vector<vector<F>> Concatence(const vector<vector<F>>& vec1, Args ...args) {
 	vector<vector<F>> result(vec1);
@@ -177,7 +176,6 @@ struct conv1d_params {
 	vector<param_t>	bias;
 	vector<param_t>	kernel;
 };
-
 class Conv1d {
 public:
 	explicit Conv1d(size_t filters, size_t kernel_size, size_t step, bool padding=true) :params(make_shared<conv1d_params>()) {
@@ -201,22 +199,199 @@ private:
 
 };
 
+
+
+
 /*
-	定义激活函数类
-		filters: filters的个数
-		kernel_size: kernel的大小
-		step：步长
-		默认padding为same
+	定义BiLSTM（待整理为类）
 */
-class Activation{
-public:
+template<int INPUT_SIZE, int LSTM_SIZE, typename T>
+void lstm(T input[INPUT_SIZE], T h_pre[LSTM_SIZE], T c_pre[LSTM_SIZE], T BIAS[LSTM_SIZE * 4], T W_X[INPUT_SIZE * LSTM_SIZE * 4], T W_H[LSTM_SIZE * LSTM_SIZE * 4]) {
+	T gates_i[LSTM_SIZE] = { 0 };
+	T gates_f[LSTM_SIZE] = { 0 };
+	T gates_g[LSTM_SIZE] = { 0 };
+	T gates_o[LSTM_SIZE] = { 0 };
+
+	T acc_x[LSTM_SIZE * 4] = { 0 };
+	T acc_h[LSTM_SIZE * 4] = { 0 };
+
+	T gates_i_activ[LSTM_SIZE] = { 0 };
+	T gates_f_activ[LSTM_SIZE] = { 0 };
+	T gates_g_activ[LSTM_SIZE] = { 0 };
+	T gates_o_activ[LSTM_SIZE] = { 0 };
+
+	T c_pre_activ[LSTM_SIZE] = { 0 };
+	for (int i = 0; i < INPUT_SIZE; i++) {
+		//#pragma HLS unroll
+		for (int j = 0; j < LSTM_SIZE * 4; j++) {
+
+			acc_x[j] += input[i] * W_X[i * LSTM_SIZE * 4 + j];
+
+		}
+	}
 
 
-private:
+	for (int i = 0; i < LSTM_SIZE; i++) {
+
+		for (int j = 0; j < LSTM_SIZE * 4; j++) {
+			acc_h[j] += h_pre[i] * W_H[i * LSTM_SIZE * 4 + j];
+
+		}
+	}
+
+
+	for (int igate = 0; igate < LSTM_SIZE; igate++) {
+		//#pragma HLS PIPELINE
+		gates_i[igate] = acc_x[igate] + acc_h[igate] + BIAS[igate];
+		gates_f[igate] = acc_x[LSTM_SIZE + igate] + acc_h[LSTM_SIZE + igate] + BIAS[LSTM_SIZE + igate];
+		gates_g[igate] = acc_x[2 * LSTM_SIZE + igate] + acc_h[2 * LSTM_SIZE + igate] + BIAS[2 * LSTM_SIZE + igate];
+		gates_o[igate] = acc_x[3 * LSTM_SIZE + igate] + acc_h[3 * LSTM_SIZE + igate] + BIAS[3 * LSTM_SIZE + igate];
+	}
+
+
+	sigmoid_LUT<T, LSTM_SIZE, 1024>(gates_i, gates_i_activ);
+	sigmoid_LUT<T, LSTM_SIZE, 1024>(gates_f, gates_f_activ);
+	tanh_LUT<T, LSTM_SIZE, 1024>(gates_g, gates_g_activ);
+	sigmoid_LUT<T, LSTM_SIZE, 1024>(gates_o, gates_o_activ);
+
+	/*
+	for (int i = 0; i < LSTM_SIZE; i++) {
+		gates_i_activ[i] = sigmoid<T>(gates_i[i]);
+	}
+	for (int i = 0; i < LSTM_SIZE; i++) {
+		gates_f_activ[i] = sigmoid<T>(gates_f[i]);
+	}
+	for (int i = 0; i < LSTM_SIZE; i++) {
+		gates_g_activ[i] = tanh_T<T>(gates_g[i]);
+	}
+	for (int i = 0; i < LSTM_SIZE; i++) {
+		gates_o_activ[i] = sigmoid<T>(gates_o[i]);
+	}
+	*/
+	for (int i = 0; i < LSTM_SIZE; i++) {
+		c_pre[i] = gates_f_activ[i] * c_pre[i] + gates_i_activ[i] * gates_g_activ[i];
+	}
+	/*
+	for (int i = 0; i < LSTM_SIZE; i++) {
+		c_pre_activ[i] = tanh_T<T>(c_pre[i]);
+	}*/
+	tanh_LUT<T, LSTM_SIZE, 1024>(c_pre, c_pre_activ);
+
+	for (int i = 0; i < LSTM_SIZE; i++) {
+		h_pre[i] = gates_o_activ[i] * c_pre_activ[i];
+	}
+}
+template <typename T, int TIME_STEP, int INPUT_SIZE, int LSTM_SIZE>
+void bilstm(
+	T input[TIME_STEP * INPUT_SIZE],
+	T output[TIME_STEP * LSTM_SIZE],
+	T weights_x[4 * INPUT_SIZE * LSTM_SIZE],
+	T weights_h[LSTM_SIZE * LSTM_SIZE * 4],
+	T bias[LSTM_SIZE * 4]
+) {
+
+	T  c_pre[LSTM_SIZE] = { 0 };
+	T  h_pre[LSTM_SIZE] = { 0 };
+	T* in = input;
+	for (int its = 0; its < TIME_STEP; its++) {
+		in = input + its * INPUT_SIZE;
+		lstm<INPUT_SIZE, LSTM_SIZE, T>(in, h_pre, c_pre, bias, weights_x, weights_h);
+		for (int i = 0; i < LSTM_SIZE; i++) {
+			*(output + its * LSTM_SIZE + i) = *(h_pre + i);
+		}
+	}
+}
 
 
 
-};
+
+
+/*
+	定义激活函数（待整理为类）
+*/
+template<typename T>
+T sigmoid(T x) {
+	float x_float = x;
+	float output = 1.0 / (1.0 + exp(-x_float));
+	return (T)output;
+}
+template<typename T>
+T relu(T x) {
+	return (x > 0 ? (T)x : (T)0);
+}
+template<typename T>
+T tanh_T(T x) {
+	return (T)tanh((float)x);
+}
+
+template<typename T, int N_TABLE>
+void init_sigmoid_table(T table_out[N_TABLE]) {
+	for (int ii = 0; ii < N_TABLE; ii++) {
+		float in_val = 2 * 8 * (ii - float(N_TABLE) / 2) / float(N_TABLE);
+		T real_val = sigmoid<T>(in_val);
+		table_out[ii] = real_val;
+	}
+}
+
+
+template<typename T, int SIZE_IN, int TABLE_SIZE>
+void  sigmoid_LUT(T data[SIZE_IN], T res[SIZE_IN])
+{
+	static bool initialized_sigmoid = false;
+	static T sigmoid_table[TABLE_SIZE];
+	if (!initialized_sigmoid) {
+		init_sigmoid_table<T, TABLE_SIZE>(sigmoid_table);
+		initialized_sigmoid = true;
+	}
+	// Index into the lookup table based on data
+	int data_round;
+	int index;
+	for (int ii = 0; ii < SIZE_IN; ii++) {
+		data_round = data[ii] * TABLE_SIZE / 16;
+		index = data_round + 8 * TABLE_SIZE / 16;
+		if (index < 0)   index = 0;
+		if (index > TABLE_SIZE - 1) index = TABLE_SIZE - 1;
+		res[ii] = (T)sigmoid_table[index];
+	}
+}
+
+template<typename T, int N_TABLE>
+void init_tanh_table(T table_out[N_TABLE])
+{
+	// Implement tanh lookup
+	for (int ii = 0; ii < N_TABLE; ii++) {
+		// First, convert from table index to X-value (signed 8-bit, range -4 to +4)
+		float in_val = 2 * 8.0 * (ii - float(N_TABLE) / 2.0) / float(N_TABLE);
+		// Next, compute lookup table function
+		T real_val = tanh(in_val);
+		//std::cout << "Tanh:  Lookup table Index: " <<  ii<< " In Value: " << in_val << " Result: " << real_val << std::endl;
+		table_out[ii] = real_val;
+	}
+}
+
+template<typename T, int SIZE_IN, int TABLE_SIZE>
+void  tanh_LUT(T data[SIZE_IN], T res[SIZE_IN])
+{
+	static bool initialized_tanh = false;
+	static T tanh_table[TABLE_SIZE];
+	if (!initialized_tanh) {
+		init_tanh_table<T, TABLE_SIZE>(tanh_table);
+		initialized_tanh = true;
+	}
+
+	// Index into the lookup table based on data
+	int data_round;
+	int index;
+	for (int ii = 0; ii < SIZE_IN; ii++) {
+		data_round = data[ii] * TABLE_SIZE / 16;
+		index = data_round + 8 * TABLE_SIZE / 16;
+		//std::cout << "Input: "  << data[ii] << " Round: " << data_round << " Index: " << index << std::endl;
+		if (index < 0)   index = -1;
+		if (index > TABLE_SIZE - 1) index = TABLE_SIZE - 1;
+		res[ii] = tanh_table[index];
+	}
+}
+
 
 
 
