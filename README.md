@@ -4,14 +4,9 @@
 
 网络实现的代码在_public.h与_public.cpp中
 
-目前实现网络包括：
-
+目前实现功能包括：
+- 读取h5模型文件的存储并储存在unordered_map中方便后续调用
 - 批归一化层
 - Conv1D层
-<<<<<<< HEAD
 - 激活函数（Sigmoid、tanh、relu）
 - Bi-LSTM
-=======
-- 激活函数（ELU、tanh）
-- Bi-LSTM
->>>>>>> 6613f6a1c52f054d65e5b6b34ff44cf7e1e2f91a
